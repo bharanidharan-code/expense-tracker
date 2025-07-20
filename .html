@@ -1,0 +1,161 @@
+from flask import Flask, render_template_string, request, jsonify import pyodbc app = Flask(__name__) # Database credentials SERVER = '103.207.1.91' DATABASE = 'CSE9286' USERNAME = 'MZCET' PASSWORD = 'MZCET@1234' def get_connection(): return pyodbc.connect(
+f"DRIVER={{ODBC Driver 17 for SQL Server}};" f"SERVER={SERVER};DATABASE={DATABASE};UID={USERNAME};PWD={PASSWORD}" ) def initialize_db(): conn = get_connection() cursor = conn.cursor() cursor.execute(""" IF NOT EXISTS ( SELECT * FROM sysobjects WHERE name='Expenses'
+AND xtype='U' ) CREATE TABLE Expenses ( ExpenseID INT IDENTITY(1,1) PRIMARY KEY, Date DATE NOT NULL, Category VARCHAR(50), Description VARCHAR(255), Amount DECIMAL(10, 2) ); """) conn.commit() conn.close() @app.route('/', methods=['GET', 'POST']) def
+index(): initialize_db() conn = get_connection() cursor = conn.cursor() # Handle form submission if request.method == 'POST' and 'date' in request.form: date = request.form['date'] category = request.form['category'] description = request.form['description']
+amount = request.form['amount'] cursor.execute(""" INSERT INTO Expenses (Date, Category, Description, Amount) VALUES (?, ?, ?, ?) """, (date, category, description, amount)) conn.commit() # Load expenses cursor.execute("SELECT * FROM Expenses ORDER BY
+Date DESC") expenses = cursor.fetchall() conn.close() return render_template_string(template, expenses=expenses) @app.route('/run_query', methods=['POST']) def run_query(): query = request.form.get('query', '').strip() if not query: return jsonify({'status':
+'error', 'message': 'No query provided.'}) try: conn = get_connection() cursor = conn.cursor() cursor.execute(query) if query.lower().startswith("select"): columns = [col[0] for col in cursor.description] rows = cursor.fetchall() data = [list(row) for
+row in rows] conn.close() return jsonify({'status': 'success', 'columns': columns, 'data': data}) else: conn.commit() conn.close() return jsonify({'status': 'success', 'message': 'Query executed successfully.'}) except Exception as e: return jsonify({'status':
+'error', 'message': str(e)}) # Template HTML template = '''
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Expense Tracker & SQL Executor</title>
+    <style>
+        body {
+            font-family: Arial;
+            margin: 20px;
+        }
+        
+        input,
+        select,
+        textarea,
+        button {
+            margin: 5px 0;
+            width: 100%;
+            padding: 8px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            overflow-x: auto;
+            display: block;
+        }
+        
+        th,
+        td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+            white-space: nowrap;
+        }
+        
+        th {
+            background-color: #f2f2f2;
+        }
+        
+        .form-section {
+            margin-bottom: 40px;
+        }
+        
+        .success {
+            color: green;
+        }
+        
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Expense Tracker</h2>
+    <div class="form-section">
+        <form method="POST">
+            <label>Date:</label>
+            <input type="date" name="date" required>
+            <label>Category:</label>
+            <select name="category" required>
+                <option value="">--Select Category--</option>
+                <option>Food</option>
+                <option>Transport</option>
+                <option>Groceries</option>
+                <option>Entertainment</option>
+                <option>Bills</option>
+                <option>Other</option>
+            </select>
+            <label>Description:</label>
+            <textarea name="description" rows="2" required></textarea>
+            <label>Amount (₹):</label>
+            <input type="number" step="0.01" name="amount" required>
+            <button type="submit">Add Expense</button>
+        </form>
+    </div>
+
+    <h3>All Expenses</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Category</th>
+                <th>Description</th>
+                <th>Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in expenses %}
+            <tr>
+                <td>{{ row.Date }}</td>
+                <td>{{ row.Category }}</td>
+                <td>{{ row.Description }}</td>
+                <td>{{ row.Amount }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Run SQL Query</h2>
+    <div class="form-section">
+        <form id="queryForm">
+            <textarea name="query" rows="5" placeholder="Enter your SQL query here..."></textarea>
+            <button type="submit">Run Query</button>
+        </form>
+        <div id="queryResult"></div>
+    </div>
+
+    <script>
+        document.getElementById("queryForm").addEventListener("submit", function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+
+            fetch("/run_query", {
+                    method: "POST",
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(result => {
+                    const output = document.getElementById("queryResult");
+                    output.innerHTML = "";
+
+                    if (result.status === "success") {
+                        if (result.data) {
+                            let table = "<table class='output-table'><thead><tr>";
+                            result.columns.forEach(col => table += `<th>${col}</th>`);
+                            table += "</tr></thead><tbody>";
+                            result.data.forEach(row => {
+                                table += "<tr>";
+                                row.forEach(cell => table += `<td>${cell}</td>`);
+                                table += "</tr>";
+                            });
+                            table += "</tbody></table>";
+                            output.innerHTML = table;
+                        } else {
+                            output.innerHTML = `<p class="success">${result.message}</p>`;
+                        }
+                    } else {
+                        output.innerHTML = `<p class="error">Error: ${result.message}</p>`;
+                    }
+                })
+                .catch(error => {
+                    document.getElementById("queryResult").innerHTML =
+                        `<p class="error">Error: ${error}</p>`;
+                });
+        });
+    </script>
+</body>
+
+</html>
+''' if __name__ == '__main__': app.run(debug=True)
